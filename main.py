@@ -1,130 +1,111 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 import joblib
-import pandas as pd
+import numpy as np
 
-# ===============================
-# APP CONFIG
-# ===============================
-app = FastAPI(
-    title="FarmMate AI API",
-    description="Sri Lanka Agriculture AI System",
-    version="1.0"
-)
+app = Flask(__name__)
+CORS(app)
 
-# ===============================
-# LOAD MODELS
-# ===============================
+# ======================
+# LOAD TRAINED MODELS
+# ======================
 yield_model = joblib.load("yield_model.pkl")
 pest_model = joblib.load("pest_model.pkl")
+market_model = joblib.load("market_model.pkl")
 
-# ===============================
-# LOAD ENCODERS
-# ===============================
-district_enc = joblib.load("district_encoder.pkl")
-season_enc = joblib.load("season_encoder.pkl")
-crop_enc = joblib.load("crop_encoder.pkl")
-soil_enc = joblib.load("soil_encoder.pkl")
+# ======================
+# HOME TEST ROUTE
+# ======================
+@app.route("/")
+def home():
+    return {"status": "FarmMate API is running 🚜"}
 
-# ===============================
-# REQUEST SCHEMAS
-# ===============================
-class YieldRequest(BaseModel):
-    district: str
-    season: str
-    crop: str
-    rainfall_mm: float
-    temperature_c: float
-    soil_type: str
-    fertilizer_kg: float
+# =================================================
+# 🌾 RICE YIELD PREDICTION API
+# INPUT MATCHES:
+# district, season, crop, rainfall_mm, temperature_c,
+# soil_type, fertilizer_kg
+# =================================================
+@app.route("/predict/yield", methods=["POST"])
+def predict_yield():
+    data = request.json
 
-class PestRequest(BaseModel):
-    district: str
-    season: str
-    crop: str
-    temperature_c: float
-    rainfall_mm: float
-    humidity: float
+    input_data = np.array([[
+        int(data["district"]),
+        int(data["season"]),
+        int(data["crop"]),
+        float(data["rainfall_mm"]),
+        float(data["temperature_c"]),
+        int(data["soil_type"]),
+        float(data["fertilizer_kg"])
+    ]])
 
-# ===============================
-# RESPONSE SCHEMAS
-# ===============================
-class YieldResponse(BaseModel):
-    predicted_yield_kg_per_ha: float
+    prediction = yield_model.predict(input_data)[0]
 
-class PestResponse(BaseModel):
-    pest_risk: str
+    return jsonify({
+        "predicted_yield_kg_ha": round(prediction, 2),
+        "yield_category": (
+            "High" if prediction > 5000 else
+            "Medium" if prediction > 3500 else
+            "Low"
+        )
+    })
 
-# ===============================
-# ROOT ENDPOINT
-# ===============================
-@app.get("/")
-def root():
-    return {"message": "FarmMate API running"}
+# =================================================
+# 🐛 PEST OUTBREAK PREDICTION API
+# INPUT MATCHES:
+# district, season, crop, temperature_c, rainfall_mm, humidity
+# =================================================
+@app.route("/predict/pest", methods=["POST"])
+def predict_pest():
+    data = request.json
 
-# ===============================
-# YIELD PREDICTION
-# ===============================
-@app.post("/predict-yield", response_model=YieldResponse)
-def predict_yield(data: YieldRequest):
+    input_data = np.array([[
+        int(data["district"]),
+        int(data["season"]),
+        int(data["crop"]),
+        float(data["temperature_c"]),
+        float(data["rainfall_mm"]),
+        float(data["humidity"])
+    ]])
 
-    district = district_enc.transform([data.district])[0]
-    season = season_enc.transform([data.season])[0]
-    crop = crop_enc.transform([data.crop])[0]
-    soil = soil_enc.transform([data.soil_type])[0]
+    prediction = pest_model.predict(input_data)[0]
+    probability = pest_model.predict_proba(input_data)[0][1]
 
-    X = pd.DataFrame([[
-        district,
-        season,
-        crop,
-        data.rainfall_mm,
-        data.temperature_c,
-        soil,
-        data.fertilizer_kg
-    ]], columns=[
-        "district",
-        "season",
-        "crop",
-        "rainfall_mm",
-        "temperature_c",
-        "soil_type",
-        "fertilizer_kg"
-    ])
+    return jsonify({
+        "pest_outbreak": bool(prediction),
+        "risk_probability": round(probability * 100, 2),
+        "alert": "High Risk ⚠️" if probability > 0.7 else "Low Risk ✅"
+    })
 
-    prediction = yield_model.predict(X)[0]
+# =================================================
+# 📈 MARKET PRICE FORECAST API
+# INPUT MATCHES:
+# day, min_price, max_price, volume
+# =================================================
+@app.route("/predict/price", methods=["POST"])
+def predict_price():
+    data = request.json
 
-    return YieldResponse(
-        predicted_yield_kg_per_ha=round(float(prediction), 2)
-    )
+    input_data = np.array([[
+        int(data["day"]),
+        float(data["min_price"]),
+        float(data["max_price"]),
+        int(data["volume"])
+    ]])
 
-# ===============================
-# PEST RISK PREDICTION
-# ===============================
-@app.post("/predict-pest", response_model=PestResponse)
-def predict_pest(data: PestRequest):
+    prediction = market_model.predict(input_data)[0]
 
-    district = district_enc.transform([data.district])[0]
-    season = season_enc.transform([data.season])[0]
-    crop = crop_enc.transform([data.crop])[0]
+    return jsonify({
+        "predicted_avg_price": round(prediction, 2),
+        "recommendation": (
+            "Sell Now 📦" if prediction > data["max_price"]
+            else "Hold ⏳"
+        )
+    })
 
-    X = pd.DataFrame([[
-        district,
-        season,
-        crop,
-        data.temperature_c,
-        data.rainfall_mm,
-        data.humidity
-    ]], columns=[
-        "district",
-        "season",
-        "crop",
-        "temperature_c",
-        "rainfall_mm",
-        "humidity"
-    ])
-
-    result = pest_model.predict(X)[0]
-
-    return PestResponse(
-        pest_risk="High" if int(result) == 1 else "Low"
-    )
+# ======================
+# RAILWAY ENTRY POINT
+# ======================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8000)
