@@ -46,28 +46,33 @@ class PestRequest(BaseModel):
     rainfall_mm: float
     humidity: float
 
+# ===============================
+# RESPONSE SCHEMAS
+# ===============================
+class YieldResponse(BaseModel):
+    predicted_yield_kg_per_ha: float
+
+class PestResponse(BaseModel):
+    pest_risk: str
 
 # ===============================
-# ROOT CHECK
+# ROOT ENDPOINT
 # ===============================
 @app.get("/")
 def root():
     return {"message": "FarmMate API running"}
 
-
 # ===============================
 # YIELD PREDICTION
 # ===============================
-@app.post("/predict-yield")
+@app.post("/predict-yield", response_model=YieldResponse)
 def predict_yield(data: YieldRequest):
 
-    # Encode categorical values
     district = district_enc.transform([data.district])[0]
     season = season_enc.transform([data.season])[0]
     crop = crop_enc.transform([data.crop])[0]
     soil = soil_enc.transform([data.soil_type])[0]
 
-    # Create input dataframe
     X = pd.DataFrame([[
         district,
         season,
@@ -88,15 +93,14 @@ def predict_yield(data: YieldRequest):
 
     prediction = yield_model.predict(X)[0]
 
-    return {
-        "predicted_yield_kg_per_ha": round(float(prediction), 2)
-    }
-
+    return YieldResponse(
+        predicted_yield_kg_per_ha=round(float(prediction), 2)
+    )
 
 # ===============================
 # PEST RISK PREDICTION
 # ===============================
-@app.post("/predict-pest")
+@app.post("/predict-pest", response_model=PestResponse)
 def predict_pest(data: PestRequest):
 
     district = district_enc.transform([data.district])[0]
@@ -121,6 +125,6 @@ def predict_pest(data: PestRequest):
 
     result = pest_model.predict(X)[0]
 
-    return {
-        "pest_risk": "High" if int(result) == 1 else "Low"
-    }
+    return PestResponse(
+        pest_risk="High" if int(result) == 1 else "Low"
+    )
