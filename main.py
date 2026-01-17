@@ -1,102 +1,173 @@
 from flask import Flask, request, jsonify
+import pandas as pd
 import numpy as np
-import traceback
 
 app = Flask(__name__)
 
-# -------------------------------
-# Dummy ML logic (replace later)
-# -------------------------------
+# ===============================
+# Load datasets ONCE
+# ===============================
+yield_df = pd.read_csv("sri_lanka_yield_data.csv")
+pest_df = pd.read_csv("sri_lanka_pest_data.csv")
+market_df = pd.read_csv("sri_lanka_market_prices.csv")
 
-def predict_yield(features):
-    # Example logic (replace with trained model)
-    return round(float(np.sum(features) * 1.25), 2)
-
-def predict_pest(features):
-    # Example logic (replace with trained model)
-    risk_score = np.mean(features)
-    if risk_score > 0.6:
-        return "High"
-    elif risk_score > 0.3:
-        return "Medium"
-    else:
-        return "Low"
-
-
-# -------------------------------
-# Yield Prediction API
-# -------------------------------
-@app.route("/predict/yield", methods=["POST"])
-def yield_prediction():
+# ===============================
+# Utility functions
+# ===============================
+def safe_float(val):
     try:
-        data = request.get_json(force=True)
+        return float(val)
+    except:
+        return 0.0
 
-        features = data.get("features")
-        if not features or not isinstance(features, list):
-            return jsonify({
-                "success": False,
-                "error": "Invalid or missing features"
-            }), 400
-
-        features = np.array(features, dtype=float)
-        result = predict_yield(features)
-
-        return jsonify({
-            "success": True,
-            "predicted_yield": result,
-            "unit": "kg/acre"
-        })
-
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
-
-# -------------------------------
-# Pest Warning API
-# -------------------------------
-@app.route("/predict/pest", methods=["POST"])
-def pest_prediction():
-    try:
-        data = request.get_json(force=True)
-
-        features = data.get("features")
-        if not features or not isinstance(features, list):
-            return jsonify({
-                "success": False,
-                "error": "Invalid or missing features"
-            }), 400
-
-        features = np.array(features, dtype=float)
-        risk = predict_pest(features)
-
-        return jsonify({
-            "success": True,
-            "pest_risk_level": risk
-        })
-
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
-
-# -------------------------------
+# ===============================
 # Health Check
-# -------------------------------
+# ===============================
 @app.route("/", methods=["GET"])
-def health():
+def home():
     return jsonify({
-        "status": "API running",
-        "services": ["Yield Prediction", "Pest Warning"]
+        "status": "FarmMate API running",
+        "services": [
+            "Yield Prediction",
+            "Pest Warning",
+            "Market Prices"
+        ]
     })
 
+# ===============================
+# Yield Prediction
+# ===============================
+@app.route("/predict/yield", methods=["POST"])
+def predict_yield():
+    try:
+        data = request.get_json(force=True)
 
-# -------------------------------
-# App Runner
-# -------------------------------
+        district = data["district"]
+        season = data["season"]
+        crop = data["crop"]
+        rainfall = safe_float(data["rainfall_mm"])
+        temperature = safe_float(data["temperature_c"])
+        fertilizer = safe_float(data["fertilizer_kg"])
+
+        filtered = yield_df[
+            (yield_df["district"] == district) &
+            (yield_df["season"] == season) &
+            (yield_df["crop"] == crop)
+        ]
+
+        if filtered.empty:
+            return jsonify({
+                "success": False,
+                "message": "No yield data found"
+            })
+
+        avg_yield = filtered["yield_kg_ha"].mean()
+
+        # Simple real-world adjustment logic
+        predicted_yield = avg_yield + (
+            (rainfall - filtered["rainfall_mm"].mean()) * 1.5 +
+            (temperature - filtered["temperature_c"].mean()) * 10 +
+            (fertilizer - filtered["fertilizer_kg"].mean()) * 0.8
+        )
+
+        return jsonify({
+            "success": True,
+            "predicted_yield_kg_ha": round(predicted_yield, 2)
+        })
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ===============================
+# Pest Warning
+# ===============================
+@app.route("/predict/pest", methods=["POST"])
+def predict_pest():
+    try:
+        data = request.get_json(force=True)
+
+        district = data["district"]
+        season = data["season"]
+        crop = data["crop"]
+        temperature = safe_float(data["temperature_c"])
+        rainfall = safe_float(data["rainfall_mm"])
+        humidity = safe_float(data["humidity"])
+
+        filtered = pest_df[
+            (pest_df["district"] == district) &
+            (pest_df["season"] == season) &
+            (pest_df["crop"] == crop)
+        ]
+
+        if filtered.empty:
+            return jsonify({
+                "success": False,
+                "message": "No pest data found"
+            })
+
+        avg_pest = filtered["pest_level"].mean()
+
+        risk_score = (
+            (temperature / 40) +
+            (rainfall / 300) +
+            (humidity / 100) +
+            avg_pest
+        ) / 4
+
+        if risk_score > 0.65:
+            level = "High"
+        elif risk_score > 0.35:
+            level = "Medium"
+        else:
+            level = "Low"
+
+        return jsonify({
+            "success": True,
+            "pest_risk_level": level
+        })
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ===============================
+# Market Price (Latest)
+# ===============================
+@app.route("/predict/market", methods=["POST"])
+def predict_market():
+    try:
+        data = request.get_json(force=True)
+
+        crop = data["crop"]
+        market = data["market"]
+
+        filtered = market_df[
+            (market_df["crop"] == crop) &
+            (market_df["market"] == market)
+        ]
+
+        if filtered.empty:
+            return jsonify({
+                "success": False,
+                "message": "No market data found"
+            })
+
+        latest = filtered.iloc[-1]
+
+        return jsonify({
+            "success": True,
+            "crop": crop,
+            "market": market,
+            "min_price": float(latest["min_price"]),
+            "max_price": float(latest["max_price"]),
+            "avg_price": float(latest["avg_price"]),
+            "volume": int(latest["volume"])
+        })
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ===============================
+# Run App
+# ===============================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=5000)
