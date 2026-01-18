@@ -1,111 +1,69 @@
-from flask import Flask, request, jsonify
+from fastapi import FastAPI, UploadFile, File
 import numpy as np
-import joblib
+import tensorflow as tf
+from PIL import Image
+import io
 
-app = Flask(__name__)
+app = FastAPI()
 
-# ===============================
-# Load ML models ONCE
-# ===============================
-yield_model = joblib.load("yield_model.pkl")
-pest_model = joblib.load("pest_model.pkl")
-market_model = joblib.load("market_model.pkl")
+IMG_SIZE = 224
 
-# ===============================
-# Helpers
-# ===============================
-def to_float(x):
-    try:
-        return float(x)
-    except:
-        return 0.0
+# Load TFLite models
+health_interpreter = tf.lite.Interpreter(model_path="rice_health_binary.tflite")
+health_interpreter.allocate_tensors()
 
-# ===============================
-# Health
-# ===============================
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({
-        "status": "FarmMate ML API running",
-        "models_loaded": True
-    })
+disease_interpreter = tf.lite.Interpreter(model_path="rice_disease_classifier.tflite")
+disease_interpreter.allocate_tensors()
 
-# ===============================
-# Yield Prediction
-# ===============================
-@app.route("/predict/yield", methods=["POST"])
-def predict_yield():
-    try:
-        data = request.get_json(force=True)
+health_input = health_interpreter.get_input_details()
+health_output = health_interpreter.get_output_details()
 
-        X = np.array([[
-            to_float(data["rainfall_mm"]),
-            to_float(data["temperature_c"]),
-            to_float(data["fertilizer_kg"])
-        ]])
+disease_input = disease_interpreter.get_input_details()
+disease_output = disease_interpreter.get_output_details()
 
-        prediction = yield_model.predict(X)[0]
+DISEASE_CLASSES = [
+    "Bacterial Leaf Blight",
+    "Brown Spot",
+    "Leaf Blast",
+    "Leaf Scald",
+    "Narrow Brown Leaf Spot",
+    "Neck Blast",
+    "Rice Hispa",
+    "Sheath Blight"
+]
 
-        return jsonify({
-            "success": True,
-            "predicted_yield_kg_ha": round(float(prediction), 2)
-        })
+def preprocess_image(image_bytes):
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    image = image.resize((IMG_SIZE, IMG_SIZE))
+    image = np.array(image) / 255.0
+    return np.expand_dims(image.astype(np.float32), axis=0)
 
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+@app.post("/predict")
+async def predict(file: UploadFile = File(...)):
+    image_bytes = await file.read()
+    img = preprocess_image(image_bytes)
 
-# ===============================
-# Pest Warning
-# ===============================
-@app.route("/predict/pest", methods=["POST"])
-def predict_pest():
-    try:
-        data = request.get_json(force=True)
+    # STEP 1: Healthy vs Diseased
+    health_interpreter.set_tensor(health_input[0]['index'], img)
+    health_interpreter.invoke()
+    health_pred = health_interpreter.get_tensor(health_output[0]['index'])[0][0]
 
-        X = np.array([[
-            to_float(data["temperature_c"]),
-            to_float(data["rainfall_mm"]),
-            to_float(data["humidity"])
-        ]])
+    if health_pred < 0.5:
+        return {
+            "status": "Healthy",
+            "confidence": round((1 - health_pred) * 100, 2)
+        }
 
-        risk = pest_model.predict(X)[0]
+    # STEP 2: Disease classification
+    disease_interpreter.set_tensor(disease_input[0]['index'], img)
+    disease_interpreter.invoke()
+    disease_preds = disease_interpreter.get_tensor(disease_output[0]['index'])[0]
 
-        levels = {0: "Low", 1: "Medium", 2: "High"}
+    index = np.argmax(disease_preds)
+    confidence = float(disease_preds[index]) * 100
 
-        return jsonify({
-            "success": True,
-            "pest_risk_level": levels.get(int(risk), "Unknown")
-        })
-
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-# ===============================
-# Market Price Prediction
-# ===============================
-@app.route("/predict/market", methods=["POST"])
-def predict_market():
-    try:
-        data = request.get_json(force=True)
-
-        X = np.array([[
-            to_float(data["min_price"]),
-            to_float(data["max_price"]),
-            to_float(data["volume"])
-        ]])
-
-        predicted_price = market_model.predict(X)[0]
-
-        return jsonify({
-            "success": True,
-            "predicted_avg_price": round(float(predicted_price), 2)
-        })
-
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-# ===============================
-# Run
-# ===============================
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    return {
+        "status": "Diseased",
+        "disease": DISEASE_CLASSES[index],
+        "confidence": round(confidence, 2)
+    }
