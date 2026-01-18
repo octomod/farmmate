@@ -1,6 +1,25 @@
-fastapi
-uvicorn
-tensorflow
-numpy
-pillow
-python-multipart
+# requirements.txt
+# Python dependencies for Rice Disease Detection API
+
+# Web Framework
+Flask==3.0.0
+flask-cors==4.0.0
+
+# Machine Learning
+tensorflow==2.15.0
+# Note: For CPU-only (smaller), use: tensorflow-cpu==2.15.0
+
+# Image Processing
+Pillow==10.1.0
+
+# Numerical Computing
+numpy==1.26.2
+
+# Production Server (optional, for deployment)
+gunicorn==21.2.0
+
+# Utilities
+python-dotenv==1.0.0
+
+# For Railway/Cloud deployment
+waitress==2.1.2
