@@ -1,9 +1,10 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
-import numpy as np
 import tensorflow as tf
+import numpy as np
 import io
+import os
 import traceback
 
 app = FastAPI()
@@ -11,25 +12,12 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["*"],
     allow_headers=["*"],
+    allow_methods=["*"],
 )
 
-# ==========================
-# LOAD MODELS (ON START)
-# ==========================
-try:
-    health_model = tf.lite.Interpreter(model_path="rice_health_binary.tflite")
-    health_model.allocate_tensors()
-
-    disease_model = tf.lite.Interpreter(model_path="rice_disease_classifier.tflite")
-    disease_model.allocate_tensors()
-
-except Exception as e:
-    print("MODEL LOAD ERROR:", e)
-    raise e
-
 IMG_SIZE = 224
+
 DISEASE_CLASSES = [
     "Bacterial Leaf Blight",
     "Brown Spot",
@@ -42,58 +30,86 @@ DISEASE_CLASSES = [
 ]
 
 # ==========================
-# IMAGE PREPROCESS
+# MODEL LOAD WITH VERIFICATION
 # ==========================
-def preprocess_image(image_bytes):
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    image = image.resize((IMG_SIZE, IMG_SIZE))
-    image = np.array(image, dtype=np.float32) / 255.0
-    return np.expand_dims(image, axis=0)
+def load_model(path):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"MODEL NOT FOUND: {path}")
+    interpreter = tf.lite.Interpreter(model_path=path)
+    interpreter.allocate_tensors()
+    return interpreter
+
+try:
+    health_model = load_model("rice_health_binary.tflite")
+    disease_model = load_model("rice_disease_classifier.tflite")
+    print("✅ MODELS LOADED SUCCESSFULLY")
+except Exception as e:
+    print("❌ MODEL LOAD FAILED")
+    traceback.print_exc()
+    raise e
 
 # ==========================
-# PREDICT ENDPOINT
+# HEALTH CHECK (CRITICAL)
+# ==========================
+@app.get("/")
+def root():
+    return {
+        "status": "API RUNNING",
+        "models_loaded": True
+    }
+
+# ==========================
+# IMAGE PREPROCESS
+# ==========================
+def preprocess_image(bytes_data):
+    image = Image.open(io.BytesIO(bytes_data)).convert("RGB")
+    image = image.resize((IMG_SIZE, IMG_SIZE))
+    arr = np.array(image, dtype=np.float32) / 255.0
+    return np.expand_dims(arr, axis=0)
+
+# ==========================
+# PREDICT
 # ==========================
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     try:
-        if not file:
-            return {"error": "No image received"}
+        if file is None:
+            return {"error": "NO_FILE"}
 
-        image_bytes = await file.read()
-        input_data = preprocess_image(image_bytes)
+        img_bytes = await file.read()
+        input_tensor = preprocess_image(img_bytes)
 
-        # ---- HEALTH MODEL ----
-        health_input = health_model.get_input_details()
-        health_output = health_model.get_output_details()
-        health_model.set_tensor(health_input[0]["index"], input_data)
+        # HEALTH
+        h_in = health_model.get_input_details()[0]["index"]
+        h_out = health_model.get_output_details()[0]["index"]
+        health_model.set_tensor(h_in, input_tensor)
         health_model.invoke()
-        health_pred = health_model.get_tensor(health_output[0]["index"])[0][0]
+        health_score = health_model.get_tensor(h_out)[0][0]
 
-        if health_pred < 0.5:
+        if health_score < 0.5:
             return {
                 "status": "Healthy",
-                "confidence": round((1 - health_pred) * 100, 2)
+                "confidence": round((1 - health_score) * 100, 2)
             }
 
-        # ---- DISEASE MODEL ----
-        disease_input = disease_model.get_input_details()
-        disease_output = disease_model.get_output_details()
-        disease_model.set_tensor(disease_input[0]["index"], input_data)
+        # DISEASE
+        d_in = disease_model.get_input_details()[0]["index"]
+        d_out = disease_model.get_output_details()[0]["index"]
+        disease_model.set_tensor(d_in, input_tensor)
         disease_model.invoke()
-        preds = disease_model.get_tensor(disease_output[0]["index"])[0]
+        preds = disease_model.get_tensor(d_out)[0]
 
         idx = int(np.argmax(preds))
-        confidence = float(preds[idx]) * 100
 
         return {
             "status": "Diseased",
             "disease": DISEASE_CLASSES[idx],
-            "confidence": round(confidence, 2)
+            "confidence": round(float(preds[idx]) * 100, 2)
         }
 
     except Exception as e:
         traceback.print_exc()
         return {
-            "error": "Prediction failed",
+            "error": "PREDICTION_FAILED",
             "details": str(e)
         }
