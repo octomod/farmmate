@@ -1,13 +1,20 @@
 # requirements.txt
 # Python dependencies for Rice Disease Detection API
 
-# Web Framework
+# Choose ONE framework:
+# Option 1: Flask (use original main.py)
 Flask==3.0.0
 flask-cors==4.0.0
+gunicorn==21.2.0
+
+# Option 2: FastAPI (use fastapi_main.py and rename to main.py)
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
 
 # Machine Learning
 tensorflow==2.15.0
-# Note: For CPU-only (smaller), use: tensorflow-cpu==2.15.0
+# For CPU-only (smaller): tensorflow-cpu==2.15.0
 
 # Image Processing
 Pillow==10.1.0
@@ -15,11 +22,5 @@ Pillow==10.1.0
 # Numerical Computing
 numpy==1.26.2
 
-# Production Server (optional, for deployment)
-gunicorn==21.2.0
-
 # Utilities
 python-dotenv==1.0.0
-
-# For Railway/Cloud deployment
-waitress==2.1.2
