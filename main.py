@@ -64,8 +64,8 @@ class TFLiteModel:
 # Load models
 logger.info("🔧 Initializing models...")
 try:
-    binary_model = TFLiteModel('models/rice_health_binary.tflite')
-    disease_model = TFLiteModel('models/rice_disease_classifier.tflite')
+    binary_model = TFLiteModel('rice_health_binary.tflite')
+    disease_model = TFLiteModel('rice_disease_classifier.tflite')
     logger.info("✅ All models loaded")
 except Exception as e:
     logger.error(f"❌ Model loading failed: {e}")
