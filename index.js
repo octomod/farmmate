@@ -9,21 +9,19 @@ app.use(express.json());
 const ROBOFLOW_URL =
   "https://serverless.roboflow.com/tes-elulw/workflows/farmmate-riceleafdiseasedetection";
 
-const API_KEY = process.env.ROBOFLOW_API_KEY; // Railway env var
+const API_KEY = process.env.ROBOFLOW_API_KEY;
 
 app.post("/predict", async (req, res) => {
   try {
     const { imageUrl } = req.body;
 
     if (!imageUrl) {
-      return res.status(400).json({ error: "imageUrl required" });
+      return res.status(400).json({ error: "imageUrl is required" });
     }
 
-    const response = await fetch(ROBOFLOW_URL, {
+    const rfResponse = await fetch(ROBOFLOW_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         api_key: API_KEY,
         inputs: {
@@ -35,16 +33,32 @@ app.post("/predict", async (req, res) => {
       }),
     });
 
-    const data = await response.json();
+    const data = await rfResponse.json();
 
-    const prediction = data.outputs[0].predictions;
+    // ✅ SAFETY CHECK (THIS FIXES YOUR ERROR)
+    if (!data.outputs || !Array.isArray(data.outputs) || data.outputs.length === 0) {
+      return res.status(500).json({
+        error: "Invalid Roboflow response",
+        roboflow: data,
+      });
+    }
 
-    res.json({
-      disease: prediction.top,
-      confidence: prediction.confidence,
+    const predictions = data.outputs[0].predictions;
+
+    if (!predictions) {
+      return res.status(500).json({
+        error: "No predictions found",
+        roboflow: data,
+      });
+    }
+
+    return res.json({
+      disease: predictions.top,
+      confidence: predictions.confidence,
     });
+
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -54,5 +68,5 @@ app.get("/", (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log("Server running on port", PORT);
 });
