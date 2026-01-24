@@ -1,7 +1,4 @@
 fastapi
-uvicorn[standard]
+uvicorn
+inference-sdk
 python-multipart
-tensorflow
-Pillow
-numpy
-python-dotenv
