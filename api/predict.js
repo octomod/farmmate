@@ -1,17 +1,15 @@
-import express from "express";
 import fetch from "node-fetch";
-import cors from "cors";
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
 
-const ROBOFLOW_URL =
-  "https://serverless.roboflow.com/tes-elulw/workflows/farmmate-riceleafdiseasedetection";
+  const ROBOFLOW_URL =
+    "https://serverless.roboflow.com/tes-elulw/workflows/farmmate-riceleafdiseasedetection";
 
-const API_KEY = process.env.ROBOFLOW_API_KEY;
+  const API_KEY = process.env.ROBOFLOW_API_KEY;
 
-app.post("/predict", async (req, res) => {
   try {
     const { imageUrl } = req.body;
 
@@ -35,7 +33,6 @@ app.post("/predict", async (req, res) => {
 
     const data = await rfResponse.json();
 
-    // ✅ SAFETY CHECK (THIS FIXES YOUR ERROR)
     if (!data.outputs || !Array.isArray(data.outputs) || data.outputs.length === 0) {
       return res.status(500).json({
         error: "Invalid Roboflow response",
@@ -52,7 +49,7 @@ app.post("/predict", async (req, res) => {
       });
     }
 
-    return res.json({
+    return res.status(200).json({
       disease: predictions.top,
       confidence: predictions.confidence,
     });
@@ -60,13 +57,4 @@ app.post("/predict", async (req, res) => {
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
-});
-
-app.get("/", (req, res) => {
-  res.send("Backend running");
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
-});
+}

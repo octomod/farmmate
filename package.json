@@ -1,15 +1,9 @@
-
 {
-    "name": "roboflow-backend",
-    "version": "1.0.0",
-    "type": "module",
-    "scripts": {
-      "start": "node index.js"
-    },
-    "dependencies": {
-      "express": "^4.19.2",
-      "node-fetch": "^3.3.2",
-      "cors": "^2.8.5"
-    }
+  "name": "farmmate-api",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "node-fetch": "^3.3.2",
+    "cors": "^2.8.5"
   }
-  
+}
