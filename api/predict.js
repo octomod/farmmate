@@ -11,7 +11,8 @@ export default async function handler(req, res) {
     const API_KEY = "5QgFyxF5bz2ra2mtl3KS";
 
     try {
-        const { imageUrl } = req.body;
+        const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+        const { imageUrl } = body;
 
         if (!imageUrl) {
             return res.status(400).json({ error: "imageUrl is required" });
@@ -41,13 +42,6 @@ export default async function handler(req, res) {
         }
 
         const predictions = data.outputs[0].predictions;
-
-        if (!predictions) {
-            return res.status(500).json({
-                error: "No predictions found",
-                roboflow: data,
-            });
-        }
 
         return res.status(200).json({
             disease: predictions.top,
